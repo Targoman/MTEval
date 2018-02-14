@@ -1,0 +1,255 @@
+
+
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import Metrics.*;
+import ModifiedBLEU.*;
+
+
+
+public class Evaluator {
+
+	/**
+	 * @param args
+	 */
+	
+
+	static String WORDNET_ADDRESS = "D:\\Program Files (x86)\\WordNet\\2.1\\dict";
+
+	BufferedReader candidatesFile;
+	BufferedReader referencesFile[];
+	int normMethod = 1;
+	boolean caseSensitive = false;
+	boolean noPunctuation = false;
+	String metricName = "bleu";
+	EvaluationMetric evMetric;
+
+	public FileOutputStream fos;
+	public DataOutputStream dos;
+	
+	
+	public void setOutputFile(String address){
+		try {
+			fos = new FileOutputStream(address);
+
+			dos = new DataOutputStream(fos);
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+	}
+	
+	public void setOutputStream(DataOutputStream d){
+		dos = d;
+	}
+	public void setCaseSensitive(boolean b) {
+		caseSensitive = b;
+	}
+
+	public void setPunc(boolean b) {
+		noPunctuation = b;
+	}
+
+	public void setNormMethod(int m) {
+		normMethod = m;
+	}
+
+	public Evaluator(int numOfRefs, String cFile, String rFiles[])
+			throws FileNotFoundException {
+		referencesFile = new BufferedReader[numOfRefs];
+		candidatesFile = new BufferedReader(new FileReader(cFile));
+		for (int i = 0; i < numOfRefs; i++) {
+			referencesFile[i] = new BufferedReader(new FileReader(rFiles[i]));
+		}
+	}
+
+//	candidateFile numOfReferences ref1 ... refn bleu/ter args [-p -c]
+	
+	public Evaluator(String args[]) throws FileNotFoundException, Exception {
+		int argNum = args.length;
+		candidatesFile = new BufferedReader(new FileReader(args[0]));
+		int numOfRefs = new Integer(args[1]);
+		referencesFile = new BufferedReader[numOfRefs];
+		for (int i = 0; i < numOfRefs; i++) {
+			referencesFile[i] = new BufferedReader(new FileReader(args[2 + i]));
+		}
+		int k = 2 + numOfRefs;
+		metricName = args[k++];
+		if (metricName.equals("bleu")) {
+			int n = new Integer(args[k++]);
+			evMetric = new BLEUMetric(n);
+		} else if (metricName.equals("ter")) {
+
+			evMetric = new TERMetric();
+		} else if (metricName.equals("newMetric")){
+
+			int n = new Integer(args[k++]);
+			evMetric = new ModifiedBLEU(n, WORDNET_ADDRESS);
+		}else{
+			System.err.println("Invalid Metric!");
+			throw (new Exception());
+		}
+		while (k < argNum) {
+			if (args[k].equals("-p"))
+				noPunctuation = true;
+			else if (args[k].equals("-c"))
+				caseSensitive = true;
+			k++;
+		}
+	}
+
+	public Sequence readCandidate() throws IOException {
+		String cnd = candidatesFile.readLine();
+		// System.out.println(cnd);
+		Sequence candidate = PreProcess.process(cnd, normMethod, caseSensitive,
+				noPunctuation);
+		// for(int i = 0; i < candidate.size(); i++)
+		// System.out.print(candidate.get(i) + " ");
+		// System.out.println();
+		return candidate;
+	}
+
+	public List<Sequence> readReferences() throws IOException {
+		List<Sequence> refs = new ArrayList<Sequence>();
+		int n = referencesFile.length;
+		for (int i = 0; i < n; i++) {
+			String s = referencesFile[i].readLine();
+			// System.out.println(s);
+			Sequence ref = PreProcess.process(s, normMethod, caseSensitive,
+					noPunctuation);
+			// for(int i1 = 0; i1 < ref.size(); i1++)
+			// System.out.print(ref.get(i1) + " ");
+			// System.out.println();
+			refs.add(ref);
+		}
+		return refs;
+	}
+
+	public boolean hasMoreCandidate() throws IOException {
+		int t = 0;
+		for (int i = 0; i < referencesFile.length; i++) {
+			if (referencesFile[i].ready())
+				t++;
+		}
+		if (candidatesFile.ready() && t == referencesFile.length)
+			return true;
+		if (candidatesFile.ready()) {
+			System.err.println("candidateFile is larger than referencesFiles");
+			return false;
+		}
+		if (t == referencesFile.length) {
+			System.err.println("candidateFile is smaller than referencesFiles");
+			return false;
+		}
+		return false;
+
+	}
+
+	public double BLEUScore() {
+		setCaseSensitive(true);
+		BLEUMetric bleu = new BLEUMetric(4);
+		try {
+			while (hasMoreCandidate()) {
+				Sequence candidate = readCandidate();
+				List<Sequence> references = readReferences();
+				bleu.addSentence(candidate, references);
+
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		double score = bleu.getScore();
+		return score;
+	}
+
+	public double TERScore() {
+		TERMetric ter = new TERMetric();
+		int k = 0;
+		try {
+			while (hasMoreCandidate()) {
+				Sequence candidate = readCandidate();
+				List<Sequence> references = readReferences();
+				ter.addSentence(candidate, references);
+				System.out.print(k++ + " ");
+
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		double score = ter.getScore();
+		return score;
+	}
+
+	public double calcScore() {
+		int k = 0;
+		try {
+			while (hasMoreCandidate()) {
+				Sequence candidate = readCandidate();
+				List<Sequence> references = readReferences();
+				dos.writeBytes(k + "   " + evMetric.addSentence(candidate, references) + "\n");
+				
+				System.out.println(k++);
+
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
+		return evMetric.getScore();
+	}
+
+	// candidateFile numOfReferences ref1 ... refn bleu/ter args [-p -c]
+	
+	public static void main(String[] args) {
+		// TODO Auto-generated method stub
+		
+		try {
+			Evaluator evaluator = new Evaluator(args);
+			System.out.println(evaluator.metricName + " " + evaluator.calcScore());
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		
+//		String cFile;
+//		int n;
+//		Scanner in = new Scanner(System.in);
+//		cFile = in.next();
+//		n = in.nextInt();
+//		String rFile[] = new String[n];
+//		for (int i = 0; i < n; i++) {
+//			rFile[i] = in.next();
+//		}
+//		Evaluator ev;
+//		try {
+//			ev = new Evaluator(n, cFile, rFile);
+//			System.out.println("TER Score = " + ev.TERScore());
+//		} catch (FileNotFoundException e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
+
+	}
+
+}
+
+// 1 newstest2011\cz-en\newstest2011.de-en.systran newstest2011-ref.en
+// newstest2011\de-en\newstest2011.de-en.rbmt-2 1 newstest2011-ref.en
+// newstest2011\fr-en\newstest2011.fr-en.cu-zeman 1 newstest2011-ref.en
+// newstest2011\de-en\newstest2011.de-en.cu-zeman 1 newstest2011-ref.en
+// 1 test.tok.systran ref.tok.en
